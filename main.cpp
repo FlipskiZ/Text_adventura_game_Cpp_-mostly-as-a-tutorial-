@@ -7,27 +7,50 @@
 
 using namespace std;
 
-enum ErrorList{ ///Enums are essensially a list of static integer variables. Unless assigned otherwise, each next variable is 1 more than the last.
+enum ErrorList{ ///Enums are basically a list of static integer variables. Unless assigned otherwise, each next variable is 1 more than the last.
     ERROR_NONE,
     ERROR_INVALID_INPUT,
-    ERROR_OUT_OF_BOUNDS,
+    ERROR_NOT_PASSABLE,
+};
+
+enum TileList{
+    TILE_EMPTY,
+    TILE_WALL,
+    TILE_CLOSED_DOOR,
+    TILE_OPEN_DOOR,
+};
+
+struct TILE_TYPE{ ///This is a struct, it's used as a sort of;
+	bool isPassable;
 };
 
 void clearScreen(); ///Prototype for the clearScreen() function
 void displayText(string input); ///Prototype for the displayText() function
 string processInput(string input); ///Prototype for the processInput() function. String instead of void means this function returns a string.
 
-string mapRoomDescription[mapWidth][mapHeight]; ///Declaring the map array. This is where the default description of the rooms are located. First square brackets is the X coordinate, second is the Y coordinate.
+string mapRoomDescription[mapWidth][mapHeight]; ///Declaring the description array. This is called a 2D array. This is where the default description of the rooms are located. First square brackets is the X coordinate, second is the Y coordinate.
 /** A visiual representation is something like this
 Y0 X0{"Red room"} X1{"Gray room"} X2{"Dark room"}
 Y1 X0{"Bloody room"} X1{"There is a window here, it lets a small amount of light through it, you can't make out anything through the window"} X2{"Example room"}
 Y2 X0{"Seventh room"} X1{"Wall to the south"} X2{"Corner in the south east"}
-The total amount of rooms, as you could probably count, is 9(mapHeight*mapWidth=3*3=9). This is just an example to visualize the map array, this is not the actual contents**/
+The total amount of rooms, as you could probably count, is 9(mapHeight*mapWidth=3*3=9). This is just an example to visualize the description array, this is not the actual contents**/
+TileList mapArray[mapWidth][mapHeight] = { ///This map array is of type 'TileList', Which means it's restricted to the values in the TileList enum
+                                    {TILE_EMPTY, TILE_EMPTY, TILE_EMPTY},
+                                    {TILE_EMPTY, TILE_EMPTY, TILE_EMPTY},
+                                    {TILE_EMPTY, TILE_EMPTY, TILE_EMPTY},
+};
 int itemArray[mapWidth][mapHeight][maxItemsInRoom]; ///X and Y coordinate array for items lying in a room. First square brackets are X coordinate, second is Y, third are the spots in where the items can lie on the ground.
 
 int playerInventory[inventorySpace]; ///How much space in the players inventory
 int playerRoomPos[2]; ///playerRoomPos[0] is the X coordinate, playerRoomPos[1] is the Y coordinate. See the connection with the map array? This is importiant.
 int invalidInput = ERROR_NONE;
+
+TILE_TYPE tileIndex[] = { ///Initialization of the struct
+	{true}, // (0) TILE_EMPTY
+	{false}, // (1) TILE_WALL
+	{false}, // (2) TILE_CLOSED_DOOR
+    {true}, // (3) TILE_OPEN_DOOR
+};
 
 int main(){
     bool done = false; ///Declaration of the variable to check whether or not the game is 'done' (exiting the game/winning/losing)
@@ -71,8 +94,8 @@ void displayText(string input){ ///Implementation of the displayText() function
         cout << "You entered: " << input;
     }else if(invalidInput == ERROR_INVALID_INPUT){
         cout << "Invalid input. Please make sure you typed the command in correctly";
-    }else if(invalidInput == ERROR_OUT_OF_BOUNDS){
-        cout << "There is a wall there, try another direction (out of bounds)";
+    }else if(invalidInput == ERROR_NOT_PASSABLE){
+        cout << "There is something in the way, look in the same direction for more info";
     }
     if(input.size() > 0)
         cout << string(2, '\n');
@@ -83,37 +106,55 @@ string processInput(string input){
     invalidInput = ERROR_NONE;
     /** Moving around, when the player says go (direction) the game checks if the player is allowed to go there. Basically, the game checks if the desired destination is inside the map.
     If we didn't do this we would get out-of-bounds errors which often lead to crashes and weird interactions. **/
-    if(input == "go"){
+    if(input == "go" || input == "move" || input == "travel" || input == "walk" || input == "run"){
         cout << "\nSpecify a direction\n\n";
         getline(cin, additionalInput);
         input.push_back(' '); input.append(additionalInput); ///This is for adding the new input to the string, so that when the game says what you inputted it doesn't leave anyhing out. In addition to a space.
         if(additionalInput == "north" || additionalInput == "up"){
             if(playerRoomPos[1]-1 >= 0){
-                playerRoomPos[1]--; ///Removing 1 from the Y coordinate of the player
+                if(tileIndex[mapArray[playerRoomPos[0]][playerRoomPos[1]-1]].isPassable){
+                    playerRoomPos[1]--; ///Removing 1 from the Y coordinate of the player
+                }else{
+                    invalidInput = ERROR_NOT_PASSABLE;
+                }
             }else{
-                invalidInput = ERROR_OUT_OF_BOUNDS; ///Telling the player why this wasn't possible. In this case it's because the desired destination is out of bounds of the map.
+                invalidInput = ERROR_NOT_PASSABLE; ///Telling the player why this wasn't possible. In this case it's because the desired destination is out of bounds of the map.
             }
         }else if(additionalInput == "south" || additionalInput == "down"){
             if(playerRoomPos[1]+1 < mapHeight){
-                playerRoomPos[1]++; ///Adding 1 from the Y coordinate of the player
+                if(tileIndex[mapArray[playerRoomPos[0]][playerRoomPos[1]+1]].isPassable){
+                    playerRoomPos[1]++; ///Adding 1 to the Y coordinate of the player
+                }else{
+                    invalidInput = ERROR_NOT_PASSABLE;
+                }
             }else{
-                invalidInput = ERROR_OUT_OF_BOUNDS;
+                invalidInput = ERROR_NOT_PASSABLE;
             }
         }else if(additionalInput == "west" || additionalInput == "left"){
             if(playerRoomPos[0]-1 >= 0){
-                playerRoomPos[0]--; ///Removing 1 from the X coordinate of the player
+                if(tileIndex[mapArray[playerRoomPos[0]-1][playerRoomPos[1]]].isPassable){
+                    playerRoomPos[0]--; ///Removing 1 from the X coordinate of the player
+                }else{
+                    invalidInput = ERROR_NOT_PASSABLE;
+                }
             }else{
-                invalidInput = ERROR_OUT_OF_BOUNDS;
+                invalidInput = ERROR_NOT_PASSABLE;
             }
         }else if(additionalInput == "east" || additionalInput == "right"){
             if(playerRoomPos[0]+1 < mapWidth){
-                playerRoomPos[0]++; ///Adding 1 from the X coordinate of the player
+                if(tileIndex[mapArray[playerRoomPos[0]+1][playerRoomPos[1]]].isPassable){
+                    playerRoomPos[0]++; ///Adding 1 to the X coordinate of the player
+                }else{
+                    invalidInput = ERROR_NOT_PASSABLE;
+                }
             }else{
-                invalidInput = ERROR_OUT_OF_BOUNDS;
+                invalidInput = ERROR_NOT_PASSABLE;
             }
         }else{
-            invalidInput = ERROR_INVALID_INPUT; ///Telling the player that he typed it wrong.
+            invalidInput = ERROR_INVALID_INPUT; ///Telling the player that had to type something wrong.
         }
+    }else if(input == "look" || input == "see" || input == "peek"){
+
     }else{
         invalidInput = ERROR_INVALID_INPUT;
     }
