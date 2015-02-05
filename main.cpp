@@ -1,4 +1,9 @@
-#include <iostream>
+#include <iostream> ///Standard input/output
+#include <fstream> ///For input/output to text files
+#include <stdlib.h> ///For the system("cls") function
+#include <conio.h> ///For the 'press any key to exit' at the very end of the game. Again, not standard code, would rather use an external library.
+
+#define EVER ;; ///Fun little thing you can do, perfectly legit and safe. This is used further down in the code.
 
 #define mapHeight 5 ///Height of the map
 #define mapWidth 5 ///Width of the map
@@ -14,6 +19,7 @@ enum ErrorList{ ///Enums are basically a list of static integer variables. Unles
     ERROR_INVALID_INPUT,
     ERROR_NOT_PASSABLE,
     ERROR_NOT_A_DOOR,
+    ERROR_NO_SPACE,
 };
 
 enum TileList{
@@ -21,17 +27,32 @@ enum TileList{
     TILE_WALL,
     TILE_CLOSED_DOOR,
     TILE_OPEN_DOOR,
+    TILE_LOCKED_DOOR,
+};
+
+enum ItemList{
+    ITEM_NONE,
+    ITEM_KEY,
+    ITEM_POISON,
 };
 
 struct TILE_TYPE{ ///This is a struct, it's used as a sort of;
 	bool isPassable;
 };
 
+struct ITEM_TYPE{
+    string itemName;
+    string itemDescription;
+};
+
 void clearScreen(); ///Prototype for the clearScreen() function
 void displayText(string input); ///Prototype for the displayText() function
 string processInput(string input); ///Prototype for the processInput() function. String instead of void means this function returns a string.
+void useItem(bool onPlayer, int posX, int posY, ItemList itemId, int posInInventory);
 bool isPassable(int posX, int posY); ///Prototype
 bool insideMap(int posX, int posY); ///Prototype
+void loadMapArray();
+bool checkWinCondition();
 
 string mapRoomDescription[mapWidth][mapHeight]; ///Declaring the description array. This is called a 2D array. This is where the default description of the rooms are located. First square brackets is the X coordinate, second is the Y coordinate.
 /** A visiual representation is something like this
@@ -40,35 +61,44 @@ Y1 X0{"Bloody room"} X1{"There is a window here, it lets a small amount of light
 Y2 X0{"Seventh room"} X1{"Wall to the south"} X2{"Corner in the south east"}
 The total amount of rooms, as you could probably count, is 9(mapHeight*mapWidth=3*3=9). This is just an example to visualize the description array, this is not the actual contents**/
 
-/**This map array is of type 'TileList', Which means it's restricted to the values in the TileList enum.
-Instead of using the TileList type you can simply use int. Then you have the ability to use integers and might be easier to see, the negative is that there is less clear on what is what and the program won't call you out on tiles that don't exist.
-but if you are working alone this might be preferred.
-This is the *actual* map array, where the different elements are located. Stuff like doors, and walls, etc. **/
-TileList mapArray[mapWidth][mapHeight] = {
-    {TILE_WALL,  TILE_WALL,  TILE_WALL,          TILE_WALL,  TILE_WALL}, /// (1,1,1,1,1)
-    {TILE_WALL,  TILE_EMPTY, TILE_CLOSED_DOOR,   TILE_EMPTY, TILE_WALL}, /// (1,0,2,0,1)
-    {TILE_WALL,  TILE_EMPTY, TILE_WALL,          TILE_WALL,  TILE_WALL}, /// (1,0,1,1,1)
-    {TILE_WALL,  TILE_EMPTY, TILE_EMPTY,         TILE_EMPTY, TILE_WALL}, /// (1,0,0,0,1)
-    {TILE_WALL,  TILE_WALL,  TILE_WALL,          TILE_WALL,  TILE_WALL}, /// (1,1,1,1,1)
-};
-int itemArray[mapWidth][mapHeight][maxItemsInRoom]; ///X and Y coordinate array for items lying in a room. First square brackets are X coordinate, second is Y, third are the spots in where the items can lie on the ground.
 
-int playerInventory[inventorySpace]; ///How much space in the players inventory
+///This is the *actual* map array, where the different elements are located. Stuff like doors, and walls, etc. This gets loaded up from a text file.
+int mapArray[mapWidth][mapHeight];
+ItemList itemArray[mapWidth][mapHeight][maxItemsInRoom]; ///X and Y coordinate array for items lying in a room. First square brackets are X coordinate, second is Y, third are the spots in where the items can lie on the ground.
+
+ItemList playerInventory[inventorySpace]; ///How much space in the players inventory
 int playerRoomPos[2] = {1, 1}; ///playerRoomPos[0] is the X coordinate, playerRoomPos[1] is the Y coordinate. See the connection with the map array? This is importiant. Alternatively you can create 2 variables, playerX and playerY. It might be easier to see, but then you create multiple variables.
 int playerLookPos[2] = {-1, -1}; ///Sort of redundant, not clean code. But it works.
-ErrorList invalidInput = ERROR_NONE;
+ErrorList invalidInput = ERROR_NONE; ///Declared of type ErrorList, which means that it is limited to the values in the ErrorList enum.
 
 TILE_TYPE tileIndex[] = { ///Initialization of the struct
 	{true}, // (0) TILE_EMPTY
 	{false}, // (1) TILE_WALL
 	{false}, // (2) TILE_CLOSED_DOOR
     {true}, // (3) TILE_OPEN_DOOR
+    {false}, // (4) TILE_LOCKED_DOOR
+};
+
+ITEM_TYPE itemIndex[] = {
+    {"", ""}, //ITEM_EMPTY
+    {"key", "There is a rusted key here."}, //ITEM_KEY
+    {"poison", "There is a vial of poison here."}, //ITEM_POISON
 };
 
 int main(){
     bool done = false; ///Declaration of the variable to check whether or not the game is 'done' (exiting the game/winning/losing)
+    bool wonGame = false;
     string playerInput = ""; ///Declaration of the variable to get the players input
 
+    for(int x = 0; x < mapWidth; x++){ ///Clearing the item 2D array
+        for(int y = 0; y < mapHeight; y++){
+            for(int z = 0; z < maxItemsInRoom; z++){
+                itemArray[x][y][z] = ITEM_NONE;
+            }
+        }
+    }
+
+    loadMapArray(); ///Loading the map array
     clearScreen(); ///Calling the clearScreen() function. Doing this at the start so that the screen stays consistent.
 
     ///Manually declare the descriptions of the rooms, no real better way to doing this, as you can't just randomly generate this. Or well, you can, but it won't be as good.
@@ -81,20 +111,86 @@ int main(){
     mapRoomDescription[3][1] = "You are in the top-right corner of the map";
     ///mapRoomDescription[3][2] = "You are in the center-right of the map"; Wall here too.
     mapRoomDescription[3][3] = "You are in the bottom-right corner of the map";
+    itemArray[3][3][0] = ITEM_KEY;
+    itemArray[3][3][1] = ITEM_POISON;
 
     while(!done){ ///Game loop
         displayText(playerInput); ///Calling the displayText() function
         getline(cin, playerInput); ///Getting the player input
         playerInput = processInput(playerInput); ///Calling the processInput() function. PlayerInput is equal to the function because it returns a string. This is the updated playerInput.
+        if(checkWinCondition()) ///Calling the checkWinCondition() function
+            done = true, wonGame = true;
         clearScreen(); ///Calling the clearScreen() function
+    }
+    if(wonGame){
+        ///Draw the win screen
+        cout << "--------------------------------------------------------------------------------";
+        cout << "|     best woman 2014!           congrats!      whitespace!                    |";
+        cout << "|    wow!             honey!         you found the key and put it in the door! |";
+        cout << "|          cheers!             fri spot!                                       |";
+        cout << "|       the world is saved...            check!        and saved the world!    |";
+        cout << "|   you wrote commands!     yaiyz!           m8!              hooray    mother |";
+        cout << "|        well played!         such awesome      best man 2015!        fucking  |";
+        cout << "| combinator!          you are winner!                                   win   |";
+        cout << "|                   free space!      everyone loves you!       gr8!    screen! |";
+        cout << "|     you did it!        not anymore!        tbh               b8 m8           |";
+        cout << "|                        such majestic!        you are    doctors hate you!    |";
+        cout << "|              praise               YOU  WON       quite                       |";///Middle
+        cout << "|    awesome!                press a key to continue   good   no moar space!   |";///Middle
+        cout << "|              real good!                                8/8   or, moar space?!|";
+        cout << "|  the best!                        kudos!    good guy player!  no, no moar spc|";
+        cout << "|             woohoo!  prize! this is a test end screen, please ignore!        |";
+        cout << "|  yu gut!                     nice!                          you are the best!|";
+        cout << "|         best in the world!     best trans 2016!                              |";
+        cout << "| you fokken!                             around!       praise the player!     |";
+        cout << "|    w0t m8?!           you unclosed the door!                                 |";
+        cout << "|         gr8 job m8!        now go do something useful!       well done!      |";
+        cout << "|  ci plus plus!                 like reading the code of this game!           |";
+        cout << "|new highscore!          doge!         spaaaaaaace!             around!        |";
+        cout << "--------------------------------------------------------------------------------";
+        getch(); ///The press any key to continue function. Not standard code, use an external library for this if you can.
     }
 }
 
 void clearScreen(){
-    cout << string(25, '\n');
+    ///cout << string(25, '\n'); A different way of doing things, but this is buggy unfortunately
+    system("cls"); ///usually pretty bad to use system(); But there isn't all that much of a better way to clear the screen without additional libraries.
 }
 
 void displayText(string input){ ///Implementation of the displayText() function
+    for(int y = 0; y < mapHeight; y++){
+        for(int x = 0; x < mapWidth; x++){
+            if(playerRoomPos[0] == x && playerRoomPos[1] == y){
+                cout << '@';
+            }else{
+                switch(mapArray[x][y]){
+                    case TILE_EMPTY:
+                        cout << '.';
+                        break;
+
+                    case TILE_WALL:
+                        cout << '#';
+                        break;
+
+                    case TILE_CLOSED_DOOR:
+                        cout << 'C';
+                        break;
+
+                    case TILE_OPEN_DOOR:
+                        cout << 'O';
+                        break;
+
+                    case TILE_LOCKED_DOOR:
+                        cout << 'L';
+                        break;
+
+                }
+            }
+        }
+        cout << '\n';
+    }
+    cout << string(2, '\n');
+
     cout << mapRoomDescription[playerRoomPos[0]][playerRoomPos[1]] << "\n\n"; ///\n does essentially the same thing as endl, but it is a bit faster than endl.
     /** Okay, this is a bit tricky.
     What happens here is that you write out the description from the mapRoomDescription array from the playerRoomPos[0] in the first square brackets and playerRoomPos[1] in the second square brackets. And then ending the line.
@@ -103,12 +199,32 @@ void displayText(string input){ ///Implementation of the displayText() function
     Do note that this can be done differently, you are not confined to doing things in the same order or in the same way. It is just much easier to follow and remember, it's also consistent which is important to have clean code.
     This will write the contents of that position in the array, **/
 
+    for(int i = 0; i < maxItemsInRoom; i++){
+        if(itemArray[playerRoomPos[0]][playerRoomPos[1]][i] > ITEM_NONE){ ///If not empty
+            cout << itemIndex[itemArray[playerRoomPos[0]][playerRoomPos[1]][i]].itemDescription << string(2, '\n');
+        }
+    }
+
     if(input.size() > 0 && invalidInput == 0){ ///Check if the player has entered something
         cout << "You entered: " << input;
-    }else if(invalidInput == ERROR_INVALID_INPUT){
-        cout << "Invalid input. Please make sure you typed the command in correctly";
-    }else if(invalidInput == ERROR_NOT_PASSABLE){
-        cout << "There is something in the way, look in the same direction for more info";
+    }else{
+        switch(invalidInput){
+            case ERROR_INVALID_INPUT:
+                cout << "Invalid input. Please make sure you typed the command in correctly";
+                break;
+
+            case ERROR_NOT_PASSABLE:
+                cout << "There is something in the way, look in the same direction for more info";
+                break;
+
+            case ERROR_NOT_A_DOOR:
+                cout << "That's not a closed door!";
+                break;
+
+            case ERROR_NO_SPACE:
+                cout << "There is either not enough space in your inventory, or on the ground. Depends if your are trying to take or drop an item.";
+                break;
+        }
     }
     if(input.size() > 0)
         cout << string(2, '\n');
@@ -129,6 +245,10 @@ void displayText(string input){ ///Implementation of the displayText() function
 
             case TILE_OPEN_DOOR:
                 cout << "There is an open door there. I am pretty sure you can go through it now.";
+                break;
+
+            case TILE_LOCKED_DOOR:
+                cout << "There is a locket door there. Find a key and use it on this door.";
                 break;
         }
         cout << string(2, '\n');
@@ -214,7 +334,7 @@ string processInput(string input){
         }else{
             invalidInput = ERROR_INVALID_INPUT;
         }
-    }if(input == "open" || input == "unclose"){
+    }else if(input == "open" || input == "unclose"){
         cout << "\nSpecify a direction\n\n";
         getline(cin, additionalInput);
         input.push_back(' '); input.append(additionalInput); ///This is for adding the new input to the string, so that when the game says what you inputted it doesn't leave anyhing out. In addition to a space.
@@ -259,10 +379,125 @@ string processInput(string input){
                 invalidInput = ERROR_NOT_A_DOOR;
             }
         }else{
-            invalidInput = ERROR_INVALID_INPUT; ///Telling the player that had to type something wrong.
+            invalidInput = ERROR_INVALID_INPUT;
         }
+    }else if(input == "take" || input == "grab"){
+        cout << "\nTake what?\n\n";
+        getline(cin, additionalInput);
+        input.push_back(' '); input.append(additionalInput); ///This is for adding the new input to the string, so that when the game says what you inputted it doesn't leave anyhing out. In addition to a space.
+        bool tookItem = false;
+        bool foundItem = false;
+        for(int i = 0; i < maxItemsInRoom; i++){
+            foundItem = true;
+            if(additionalInput == itemIndex[itemArray[playerRoomPos[0]][playerRoomPos[1]][i]].itemName){
+                for(int x = 0; x < inventorySpace; x++){
+                    if(playerInventory[x] == ITEM_NONE){
+                        playerInventory[x] = itemArray[playerRoomPos[0]][playerRoomPos[1]][i];
+                        itemArray[playerRoomPos[0]][playerRoomPos[1]][i] = ITEM_NONE;
+                        tookItem = true;
+                        break;
+                    }
+                }
+                if(!tookItem){
+                    invalidInput = ERROR_NO_SPACE;
+                }
+            }
+            if(!foundItem){
+                invalidInput = ERROR_INVALID_INPUT;
+            }
+        }
+    }else if(input == "drop"){
+        cout << "\nDrop what?\n\n";
+        getline(cin, additionalInput);
+        input.push_back(' '); input.append(additionalInput); ///This is for adding the new input to the string, so that when the game says what you inputted it doesn't leave anyhing out. In addition to a space.
+        bool droppedItem = false;
+        bool foundItem = false;
+        for(int i = 0; i < inventorySpace; i++){
+            if(additionalInput == itemIndex[playerInventory[i]].itemName){
+                foundItem = true;
+                for(int x = 0; x < maxItemsInRoom; x++){
+                    if(itemArray[playerRoomPos[0]][playerRoomPos[1]][x] == ITEM_NONE){
+                        itemArray[playerRoomPos[0]][playerRoomPos[1]][x] = playerInventory[i];
+                        playerInventory[i] = ITEM_NONE;
+                        droppedItem = true;
+                        break;
+                    }
+                }
+                if(!droppedItem){
+                    invalidInput = ERROR_NO_SPACE;
+                }
+            }
+        }
+        if(!droppedItem){
+            invalidInput = ERROR_INVALID_INPUT;
+        }
+    }else if(input == "use"){
+        cout << "\nWhat item to use?\n\n";
+        getline(cin, additionalInput);
+        input.push_back(' '); input.append(additionalInput); ///This is for adding the new input to the string, so that when the game says what you inputted it doesn't leave anyhing out. In addition to a space.
+        ItemList itemId = ITEM_NONE;
+        bool foundItem = false;
+
+        for(int i = 0; i < inventorySpace; i++){
+            if(additionalInput == itemIndex[playerInventory[i]].itemName){
+                foundItem = true;
+                itemId = playerInventory[i];
+                cout << "\nSpecify a direction, 'here' for where you stand\n\n";
+                getline(cin, additionalInput);
+                input.push_back(' '); input.append(additionalInput);
+                if(additionalInput == "here"){
+                    cout << "\nUse here on what? 'self' for using on self and 'room' for this room.\n\n";
+                    getline(cin, additionalInput);
+                    input.push_back(' '); input.append(additionalInput);
+                    if(additionalInput == "self"){
+                        useItem(true, 0, 0, itemId, i);
+                    }else if(additionalInput == "room"){
+                        useItem(false, playerRoomPos[0], playerRoomPos[1], itemId, i);
+                    }else{
+                        invalidInput = ERROR_INVALID_INPUT;
+                    }
+                }else if(additionalInput == "north" || additionalInput == "up"){
+                    useItem(false, playerRoomPos[0], playerRoomPos[1]-1, itemId, i);
+                }else if(additionalInput == "south" || additionalInput == "down"){
+                    useItem(false, playerRoomPos[0], playerRoomPos[1]+1, itemId, i);
+                }else if(additionalInput == "west" || additionalInput == "left"){
+                    useItem(false, playerRoomPos[0]-1, playerRoomPos[1], itemId, i);
+                }else if(additionalInput == "east" || additionalInput == "right"){
+                    useItem(false, playerRoomPos[0]+1, playerRoomPos[1], itemId, i);
+                }else{
+                    invalidInput = ERROR_INVALID_INPUT;
+                }
+                break;
+            }
+        }
+        if(!foundItem){
+            invalidInput = ERROR_INVALID_INPUT;
+        }
+    }else{
+        invalidInput = ERROR_INVALID_INPUT; ///Telling the player that had to type something wrong.
     }
     return input;
+}
+
+void useItem(bool onPlayer, int posX, int posY, ItemList itemId, int posInInventory){
+    if(onPlayer){
+        if(itemId == ITEM_POISON){
+            string gameOver;
+            cout << "You died, ";
+            for(EVER){ ///The fun thing
+                cout << "what fun thing do you want to do now?\n\n";
+                getline(cin, gameOver);
+                cout << "\nYou did '" << gameOver << "'.\n\n";
+            }
+        }
+    }else{
+        if(itemId == ITEM_KEY){
+            if(mapArray[posX][posY] == TILE_LOCKED_DOOR){
+                mapArray[posX][posY] = TILE_CLOSED_DOOR;
+                playerInventory[posInInventory] = ITEM_NONE;
+            }
+        }
+    }
 }
 
 bool isPassable(int posX, int posY){
@@ -277,4 +512,25 @@ bool insideMap(int posX, int posY){
         return true;
     }
     return false;
+}
+
+void loadMapArray(){ ///Loads the map array from a file, it's easier this way. At least in this situation.
+    ifstream mapFile;
+    mapFile.open("config/MapArray.txt");
+
+    for(int y = 0; y < mapHeight; y++){
+        for(int x = 0; x < mapWidth; x++){
+            mapFile >> mapArray[x][y];
+        }
+    }
+
+    mapFile.close();
+}
+
+bool checkWinCondition(){
+    if(playerRoomPos[0] == 3 && playerRoomPos[1] == 0){
+        return true;
+    }else{
+        return false;
+    }
 }
